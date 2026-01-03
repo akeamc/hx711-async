@@ -1,0 +1,12 @@
+[package]
+name = "hx711-async"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+critical-section = "1.2.0"
+embedded-hal = "1.0.0"
+embedded-hal-async = "1.0.0"
+
+[features]
+defmt = ["embedded-hal/defmt-03", "embedded-hal-async/defmt-03"]
