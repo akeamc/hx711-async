@@ -12,7 +12,9 @@ use critical_section::CriticalSection;
 use embedded_hal::digital::{InputPin, OutputPin};
 use embedded_hal_async::digital::Wait;
 
-const DELAY_TIME_US: u32 = 1;
+/// The time between SCK edges should, according to the datasheet, be at least
+/// 200 ns and at most 50 μs, and ideally 1 μs.
+const DELAY_TIME_NS: u32 = 1000;
 
 /// The input and gain is selected with this one enum.
 #[repr(u8)]
@@ -42,7 +44,7 @@ where
     Delay: embedded_hal::delay::DelayNs,
 {
     /// Create a new HX711 driver.
-    pub fn new(sck: SckPin, data: DataPin, delay: Delay, mode: Mode) -> Self {
+    pub const fn new(sck: SckPin, data: DataPin, delay: Delay, mode: Mode) -> Self {
         Self {
             sck,
             data,
@@ -72,7 +74,7 @@ where
     }
 
     /// Set the gain and input for the next reading.
-    pub fn set_mode(&mut self, mode: Mode) {
+    pub const fn set_mode(&mut self, mode: Mode) {
         self.mode = mode;
     }
 
@@ -86,7 +88,7 @@ where
         Ok(value)
     }
 
-    fn toggle_mode_bits(&mut self, cs: CriticalSection<'_>) -> Result<(), Error> {
+    fn toggle_mode_bits(&mut self, cs: CriticalSection) -> Result<(), Error> {
         for _ in 0..self.mode as u8 {
             // toggle SCK
             let _ = self.read_bit(cs)?;
@@ -96,12 +98,12 @@ where
 
     fn read_bit(&mut self, _cs: CriticalSection) -> Result<bool, Error> {
         self.sck.set_high()?;
-        self.delay.delay_us(DELAY_TIME_US);
+        self.delay.delay_ns(DELAY_TIME_NS);
 
         let bit = self.data.is_high()?;
 
         self.sck.set_low()?;
-        self.delay.delay_us(DELAY_TIME_US);
+        self.delay.delay_ns(DELAY_TIME_NS);
 
         Ok(bit)
     }
