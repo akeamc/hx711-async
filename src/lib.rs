@@ -25,8 +25,8 @@ pub enum Mode {
     A128 = 1,
     /// Channel B, gain 32.
     B32 = 2,
-    /// Channel A, gain 64.
-    A64 = 3,
+    /// Channel B, gain 64.
+    B64 = 3,
 }
 
 /// An HX711 instance.
