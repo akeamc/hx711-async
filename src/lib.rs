@@ -55,13 +55,16 @@ where
 
     /// Wait until a value is available and read it.
     pub async fn read(&mut self) -> Result<i32, Error> {
+        // Set the chip in normal operating mode if it's not already
+        self.sck.set_low()?;
+
         self.data.wait_for_low().await?;
 
         // Because timing is everything, we cannot risk interrupts during the
         // conversion. So no async delay is used.
         let mut bits = critical_section::with(|cs| {
             let bits = self.read_bits(cs)?;
-            self.toggle_mode_bits(cs)?;
+            self.send_mode_bits(cs)?;
             Ok(bits)
         })?;
 
@@ -78,6 +81,13 @@ where
         self.mode = mode;
     }
 
+    /// Set the SCK pin to high, which will cause the chip to power down after
+    /// 60 μs. When the chip is powered back up, its first reading will be with
+    /// [`Mode::A128`] since the mode is selected _after_ reading the data.
+    pub fn power_down(&mut self) -> Result<(), Error> {
+        self.sck.set_high()
+    }
+
     fn read_bits(&mut self, cs: CriticalSection) -> Result<u32, Error> {
         let mut value = 0u32;
         for _ in 0..24 {
@@ -88,7 +98,7 @@ where
         Ok(value)
     }
 
-    fn toggle_mode_bits(&mut self, cs: CriticalSection) -> Result<(), Error> {
+    fn send_mode_bits(&mut self, cs: CriticalSection) -> Result<(), Error> {
         for _ in 0..self.mode as u8 {
             // toggle SCK
             let _ = self.read_bit(cs)?;
