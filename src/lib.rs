@@ -40,7 +40,7 @@ pub struct Hx711<SckPin, DataPin, Delay> {
 impl<SckPin, DataPin, Delay, Error> Hx711<SckPin, DataPin, Delay>
 where
     SckPin: OutputPin<Error = Error>,
-    DataPin: InputPin<Error = Error> + Wait<Error = Error>,
+    DataPin: InputPin<Error = Error>,
     Delay: embedded_hal::delay::DelayNs,
 {
     /// Create a new HX711 driver.
@@ -53,13 +53,7 @@ where
         }
     }
 
-    /// Wait until a value is available and read it.
-    pub async fn read(&mut self) -> Result<i32, Error> {
-        // Set the chip in normal operating mode if it's not already
-        self.sck.set_low()?;
-
-        self.data.wait_for_low().await?;
-
+    fn read_inner(&mut self) -> Result<i32, Error> {
         // Because timing is everything, we cannot risk interrupts during the
         // conversion. So no async delay is used.
         let mut bits = critical_section::with(|cs| {
@@ -76,6 +70,32 @@ where
         Ok(bits.cast_signed())
     }
 
+    /// Wait until a value is available and read it.
+    pub async fn read(&mut self) -> Result<i32, Error>
+    where
+        DataPin: Wait<Error = Error>,
+    {
+        // Set the chip in normal operating mode if it's not already
+        self.power_up()?;
+
+        self.data.wait_for_low().await?;
+        self.read_inner()
+    }
+
+    /// Check if a value is available and read it if so. If not, `Ok(None)` is
+    /// returned.
+    pub fn poll_read(&mut self) -> Result<Option<i32>, Error> {
+        // Set the chip in normal operating mode if it's not already
+        self.power_up()?;
+
+        if self.data.is_low()? {
+            // Ready to read!
+            self.read_inner().map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Set the gain and input for the next reading.
     pub const fn set_mode(&mut self, mode: Mode) {
         self.mode = mode;
@@ -84,8 +104,15 @@ where
     /// Set the SCK pin to high, which will cause the chip to power down after
     /// 60 μs. When the chip is powered back up, its first reading will be with
     /// [`Mode::A128`] since the mode is selected _after_ reading the data.
+    ///
+    /// The chip is automatically powered up when [`Self::read`] or
+    /// [`Self::poll_read`] is invoked.
     pub fn power_down(&mut self) -> Result<(), Error> {
         self.sck.set_high()
+    }
+
+    fn power_up(&mut self) -> Result<(), Error> {
+        self.sck.set_low()
     }
 
     fn read_bits(&mut self, cs: CriticalSection) -> Result<u32, Error> {
