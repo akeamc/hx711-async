@@ -149,7 +149,7 @@ where
     }
 }
 
-struct ParallelHx711<SckPin, DataPin, Delay, const N: usize> {
+pub struct ParallelHx711<SckPin, DataPin, Delay, const N: usize> {
     sck: [SckPin; N],
     data: [DataPin; N],
     delay: Delay,
