@@ -9,7 +9,10 @@
 //! This driver draws inspiration from another HX711 driver, [`loadcell`](https://crates.io/crates/loadcell).
 
 use critical_section::CriticalSection;
-use embedded_hal::digital::{InputPin, OutputPin};
+use embedded_hal::{
+    delay::DelayNs,
+    digital::{InputPin, OutputPin},
+};
 use embedded_hal_async::digital::Wait;
 
 /// The time between SCK edges should, according to the datasheet, be at least
@@ -41,7 +44,7 @@ impl<SckPin, DataPin, Delay, Error> Hx711<SckPin, DataPin, Delay>
 where
     SckPin: OutputPin<Error = Error>,
     DataPin: InputPin<Error = Error>,
-    Delay: embedded_hal::delay::DelayNs,
+    Delay: DelayNs,
 {
     /// Create a new HX711 driver.
     pub const fn new(sck: SckPin, data: DataPin, delay: Delay, mode: Mode) -> Self {
@@ -143,5 +146,106 @@ where
         self.delay.delay_ns(DELAY_TIME_NS);
 
         Ok(bit)
+    }
+}
+
+struct ParallelHx711<SckPin, DataPin, Delay, const N: usize> {
+    sck: [SckPin; N],
+    data: [DataPin; N],
+    delay: Delay,
+    mode: Mode,
+}
+
+impl<SckPin, DataPin, Delay, Error, const N: usize> ParallelHx711<SckPin, DataPin, Delay, N>
+where
+    SckPin: OutputPin<Error = Error>,
+    DataPin: InputPin<Error = Error>,
+    Delay: DelayNs,
+{
+    pub fn new(sck: [SckPin; N], data: [DataPin; N], delay: Delay, mode: Mode) -> Self {
+        Self {
+            sck,
+            data,
+            delay,
+            mode,
+        }
+    }
+
+    /// Check if a value is available and read it if so. If not, `Ok(None)` is
+    /// returned.
+    pub fn poll_read(&mut self) -> Result<Option<[i32; N]>, Error> {
+        // Set the chip in normal operating mode if it's not already
+        self.power_up()?;
+
+        for data in &mut self.data {
+            // If any of the data pins are high, the chip is not ready to read
+            if data.is_high()? {
+                return Ok(None);
+            }
+        }
+
+        // Ready to read!
+        self.read_inner().map(Some)
+    }
+
+    fn read_inner(&mut self) -> Result<[i32; N], Error> {
+        // Because timing is everything, we cannot risk interrupts during the
+        // conversion. So no async delay is used.
+        let data = critical_section::with(|cs| {
+            let bits = self.read_bits(cs)?;
+            self.send_mode_bits(cs)?;
+            Ok(bits)
+        })?;
+
+        Ok(data.map(|mut bits| {
+            // convert 24-bit two's complement to 32-bit two's complement
+            if bits & 0x800000 != 0 {
+                bits |= 0xff000000;
+            }
+
+            bits.cast_signed()
+        }))
+    }
+
+    fn power_up(&mut self) -> Result<(), Error> {
+        for sck in &mut self.sck {
+            sck.set_low()?;
+        }
+        Ok(())
+    }
+
+    fn read_bits(&mut self, cs: CriticalSection) -> Result<[u32; N], Error> {
+        let mut values = [0u32; N];
+        for _ in 0..24 {
+            for (bit, value) in self.read_bit(cs)?.into_iter().zip(values.iter_mut()) {
+                // msb first
+                *value <<= 1;
+                *value |= u32::from(bit);
+            }
+        }
+        Ok(values)
+    }
+
+    fn send_mode_bits(&mut self, cs: CriticalSection) -> Result<(), Error> {
+        for _ in 0..self.mode as u8 {
+            // toggle SCK
+            let _ = self.read_bit(cs)?;
+        }
+        Ok(())
+    }
+
+    fn read_bit(&mut self, _cs: CriticalSection) -> Result<[bool; N], Error> {
+        let mut bits = [false; N];
+        for (i, bit) in bits.iter_mut().enumerate() {
+            self.sck[i].set_high()?;
+            self.delay.delay_ns(DELAY_TIME_NS);
+
+            *bit = self.data[i].is_high()?;
+
+            self.sck[i].set_low()?;
+            self.delay.delay_ns(DELAY_TIME_NS);
+        }
+
+        Ok(bits)
     }
 }
