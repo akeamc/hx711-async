@@ -214,38 +214,33 @@ where
         Ok(())
     }
 
-    fn read_bits(&mut self, cs: CriticalSection) -> Result<[u32; N], Error> {
+    fn read_bits(&mut self, _cs: CriticalSection) -> Result<[u32; N], Error> {
         let mut values = [0u32; N];
         for _ in 0..24 {
-            for (bit, value) in self.read_bit(cs)?.into_iter().zip(values.iter_mut()) {
+            for (i, value) in values.iter_mut().enumerate() {
+                self.sck[i].set_high()?;
+                self.delay.delay_ns(DELAY_TIME_NS);
+
                 // msb first
                 *value <<= 1;
-                *value |= u32::from(bit);
+                *value |= u32::from(self.data[i].is_high()?);
+
+                self.sck[i].set_low()?;
+                self.delay.delay_ns(DELAY_TIME_NS);
             }
         }
         Ok(values)
     }
 
-    fn send_mode_bits(&mut self, cs: CriticalSection) -> Result<(), Error> {
+    fn send_mode_bits(&mut self, _cs: CriticalSection) -> Result<(), Error> {
         for _ in 0..self.mode as u8 {
-            // toggle SCK
-            let _ = self.read_bit(cs)?;
+            for i in 0..N {
+                self.sck[i].set_high()?;
+                self.delay.delay_ns(DELAY_TIME_NS);
+                self.sck[i].set_low()?;
+                self.delay.delay_ns(DELAY_TIME_NS);
+            }
         }
         Ok(())
-    }
-
-    fn read_bit(&mut self, _cs: CriticalSection) -> Result<[bool; N], Error> {
-        let mut bits = [false; N];
-        for (i, bit) in bits.iter_mut().enumerate() {
-            self.sck[i].set_high()?;
-            self.delay.delay_ns(DELAY_TIME_NS);
-
-            *bit = self.data[i].is_high()?;
-
-            self.sck[i].set_low()?;
-            self.delay.delay_ns(DELAY_TIME_NS);
-        }
-
-        Ok(bits)
     }
 }
