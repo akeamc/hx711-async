@@ -2,6 +2,7 @@
 name = "hx711-async"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 
 [dependencies]
 critical-section = "1.2.0"
